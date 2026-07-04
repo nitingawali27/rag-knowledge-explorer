@@ -4,6 +4,7 @@ A React + FastAPI demo that walks through a full **Retrieval-Augmented Generatio
 
 It's built as a *teaching tool*: instead of hiding the pipeline behind a single chat box, you see the chunks it created, the embedding vectors it generated, what got retrieved for your question and how similar each match was, and exactly which chunks the LLM used to write its answer.
 
+> 🚀 For copy-pasteable from-scratch setup steps, see **[Run_Command.md](Run_Command.md)**.
 > 📖 For a deep, diagram-heavy technical walkthrough of every module and design decision, see **[Flow_Control.md](Flow_Control.md)**.
 > ☁️ To deploy this to Vercel, see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 
