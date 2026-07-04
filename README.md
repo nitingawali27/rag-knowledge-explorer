@@ -11,6 +11,7 @@ It's built as a *teaching tool*: instead of hiding the pipeline behind a single 
 
 ## Table of contents
 
+- [Demo](#demo)
 - [How it works](#how-it-works)
 - [Tech stack](#tech-stack)
 - [Prerequisites](#prerequisites)
@@ -20,6 +21,18 @@ It's built as a *teaching tool*: instead of hiding the pipeline behind a single 
 - [Project structure](#project-structure)
 - [Sample data](#sample-data)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## Demo
+
+Asking a question retrieves the top-4 matching chunks (with similarity scores and source/page attribution) and generates a cited answer from them:
+
+![Retrieved chunks and generated answer for "What payment methods does the Checkout & Payment module support?"](docs/screenshots/query-checkout-payment.png)
+
+Every question is answered strictly from what was retrieved — here the retrieved chunks come from two different documents (Notification Service and Inventory Management), and the answer cites the specific requirement ID and source it drew from:
+
+![Retrieved chunks and generated answer for "How does the platform prevent overselling during flash sales?"](docs/screenshots/query-overselling-prevention.png)
 
 ---
 
