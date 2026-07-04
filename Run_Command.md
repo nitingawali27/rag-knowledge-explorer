@@ -2,7 +2,6 @@
 
 Complete from-scratch steps to get this project running locally, assuming a brand-new machine with nothing installed yet.
 
-> ☁️ To deploy this instead of running it locally, see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 > 📖 For architecture/diagrams, see **[Flow_Control.md](Flow_Control.md)**.
 
 ---
@@ -12,6 +11,7 @@ Complete from-scratch steps to get this project running locally, assuming a bran
 - **Python 3.12** — [python.org/downloads](https://www.python.org/downloads/)
 - **Node.js 20+** and npm — [nodejs.org](https://nodejs.org/)
 - **Git**
+- **Ollama** — [ollama.com/download](https://ollama.com/download) (runs the embedding model locally)
 
 Verify:
 
@@ -19,6 +19,7 @@ Verify:
 python --version
 node --version
 git --version
+ollama --version
 ```
 
 ---
@@ -32,15 +33,17 @@ cd rag-knowledge-explorer
 
 ---
 
-## 3. Create three free cloud accounts
+## 3. Pull the embedding model and create one free account
 
-This backend has **no local-only mode** — it uses hosted services for embeddings and vector storage instead of a local model server and local disk, so it deploys the same way to Vercel. All three of the following are required just to run it locally too.
+This backend runs fully offline except for answer generation, which uses the Groq API.
+
+```bash
+ollama pull nomic-embed-text
+```
 
 | Service | Sign up at | What you need |
 |---|---|---|
 | **Groq** (LLM) | [console.groq.com](https://console.groq.com) | API key |
-| **Nomic Atlas** (embeddings) | [atlas.nomic.ai](https://atlas.nomic.ai) | API key (1M free tokens included) |
-| **Chroma Cloud** (vector store) | [trychroma.com/cloud](https://www.trychroma.com/cloud) | API key + create a database → note its tenant ID and database name |
 
 ---
 
@@ -52,24 +55,17 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open `backend/.env` and fill in the four required keys from step 3:
+Open `backend/.env` and fill in your Groq key:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=llama-3.1-8b-instant
 
-NOMIC_API_KEY=your_nomic_api_key_here
-EMBED_MODEL=nomic-embed-text-v1.5
-
-CHROMA_API_KEY=your_chroma_cloud_api_key_here
-CHROMA_TENANT=your_chroma_tenant_id
-CHROMA_DATABASE=your_chroma_database_name
+OLLAMA_BASE_URL=http://localhost:11434
+EMBED_MODEL=nomic-embed-text
 ```
 
-> **Windows only:** if `pip install` fails on `chromadb`/`hnswlib` (no prebuilt wheel for your Python version), run:
-> ```bash
-> pip install chroma-hnswlib==0.7.5
-> ```
+> **Windows only:** if `pip install` fails building `chroma-hnswlib` from source (needs C++ build tools), make sure `chromadb` is unpinned in `requirements.txt` — current releases don't depend on compiled `hnswlib`.
 
 ---
 
@@ -84,9 +80,17 @@ No `.env` needed for local use — it defaults to talking to `http://localhost:8
 
 ---
 
-## 6. Run it (two terminals)
+## 6. Run it (three terminals)
 
-**Terminal 1 — backend:**
+**Terminal 1 — Ollama:**
+
+```bash
+ollama serve
+```
+
+(Skip if Ollama is already running as a background service, which is the default after installing on Windows/Mac.)
+
+**Terminal 2 — backend:**
 
 ```bash
 cd backend
@@ -100,7 +104,7 @@ curl http://localhost:8000/api/health
 # {"status":"ok"}
 ```
 
-**Terminal 2 — frontend:**
+**Terminal 3 — frontend:**
 
 ```bash
 cd frontend
@@ -112,7 +116,7 @@ npm run dev
 ## 7. Use it
 
 1. Open **http://localhost:5173**
-2. Click **Run Ingestion** — reads the 10 sample BRD PDFs bundled in `backend/data/data/`, chunks them, embeds each chunk via Nomic, and stores vectors in your Chroma Cloud database. Watch the progress bar and per-document status fill in live.
+2. Click **Run Ingestion** — reads the 10 sample BRD PDFs bundled in `backend/data/data/`, chunks them, embeds each chunk via your local Ollama server, and stores vectors in a local ChromaDB folder (`backend/chroma_db/`). Watch the progress bar and per-document status fill in live. This can take a few minutes on CPU-only Ollama (~8-10s per chunk).
 3. Once at least one document shows `done`, type a question or click one of the sample-question chips, then **Ask**.
 4. You'll see the top-4 retrieved chunks (with similarity scores and source/page) and a Groq-generated answer citing them.
 
@@ -124,8 +128,8 @@ To use your own PDFs instead: drop them into `backend/data/data/` and click **Ru
 
 | Problem | Fix |
 |---|---|
-| `ModuleNotFoundError: hnswlib` or chromadb install fails | `pip install chroma-hnswlib==0.7.5` |
-| `/api/status` or `/api/query` returns `502 Could not connect to Chroma Cloud` | Check `CHROMA_API_KEY` / `CHROMA_TENANT` / `CHROMA_DATABASE` in `backend/.env` and that the database exists in the Chroma Cloud dashboard |
-| Ingestion fails with a Nomic error | Check `NOMIC_API_KEY` in `backend/.env` and remaining token quota |
+| `chromadb` install fails building `hnswlib` (needs C++ build tools) | Remove any `chromadb==` version pin in `requirements.txt` and reinstall |
+| Ingestion fails with "Could not reach Ollama" | Make sure `ollama serve` is running and `ollama pull nomic-embed-text` has completed |
+| `/api/status` or `/api/query` returns `502 Could not open local Chroma store` | Check that `backend/chroma_db/` (or your custom `CHROMA_DIR`) is writable |
 | Query fails with a Groq error | Check `GROQ_API_KEY` in `backend/.env` and that the account has access to `GROQ_MODEL` |
 | Frontend can't reach the backend | Confirm the backend is running on port 8000 (`curl http://localhost:8000/api/health`) |

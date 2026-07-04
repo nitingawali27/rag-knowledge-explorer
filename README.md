@@ -6,7 +6,6 @@ It's built as a *teaching tool*: instead of hiding the pipeline behind a single 
 
 > 🚀 For copy-pasteable from-scratch setup steps, see **[Run_Command.md](Run_Command.md)**.
 > 📖 For a deep, diagram-heavy technical walkthrough of every module and design decision, see **[Flow_Control.md](Flow_Control.md)**.
-> ☁️ To deploy this to Vercel, see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 
 ---
 
@@ -53,18 +52,19 @@ flowchart TB
         LLM["llm.py"]
     end
 
-    subgraph Cloud["Hosted services"]
-        NOMIC["Nomic Atlas API<br/>nomic-embed-text-v1.5"]
-        CHROMA[("Chroma Cloud<br/>vector store")]
-        GROQ["Groq API<br/>llama-3.1-8b-instant"]
+    subgraph Local["Local services"]
+        OLLAMA["Ollama<br/>nomic-embed-text"]
+        CHROMA[("ChromaDB<br/>backend/chroma_db/")]
     end
 
-    PDFS[("data/data/*.pdf")]
+    GROQ["Groq API<br/>llama-3.1-8b-instant"]
+
+    PDFS[("backend/data/data/*.pdf")]
 
     UI <-->|fetch /api/*| API
     API --> PIPE
     PIPE --> PDFS
-    PIPE <-->|embed| NOMIC
+    PIPE <-->|embed| OLLAMA
     PIPE <--> CHROMA
     API <-->|retrieve| CHROMA
     API --> LLM <-->|chat completion| GROQ
@@ -74,22 +74,22 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    A["📄 PDF files<br/>data/data/"] --> B["✂️ Chunk<br/>150 words,<br/>30-word overlap"]
-    B --> C["🧮 Embed<br/>Nomic Atlas ·<br/>nomic-embed-text-v1.5"]
-    C --> D[("🗄️ Store<br/>Chroma Cloud")]
+    A["📄 PDF files<br/>backend/data/data/"] --> B["✂️ Chunk<br/>150 words,<br/>30-word overlap"]
+    B --> C["🧮 Embed<br/>local Ollama ·<br/>nomic-embed-text"]
+    C --> D[("🗄️ Store<br/>local ChromaDB")]
     D --> E["🔎 Retrieve<br/>top-4 by<br/>cosine similarity"]
     E --> F["✨ Generate<br/>Groq ·<br/>llama-3.1-8b-instant"]
     F --> G["✅ Cited answer"]
 ```
 
-1. **Ingest** — every PDF in `data/data/` is read page by page (`pypdf`).
+1. **Ingest** — every PDF in `backend/data/data/` is read page by page (`pypdf`).
 2. **Chunk** — each page's text is split into overlapping ~150-word windows (chunks never cross a page boundary, so page numbers stay accurate for citations).
-3. **Embed** — each chunk is sent to **Nomic's hosted Atlas API** (`nomic-embed-text-v1.5`), using Nomic's recommended `search_document` task type.
-4. **Store** — chunk text, its embedding, and metadata (source file, page, chunk index) are saved in a **Chroma Cloud** collection.
-5. **Retrieve** — when you ask a question, it's embedded with the `search_query` task type and Chroma Cloud returns the top-4 most similar chunks.
+3. **Embed** — each chunk is sent to a **local Ollama server** (`nomic-embed-text`), using Nomic's recommended `search_document:` text prefix.
+4. **Store** — chunk text, its embedding, and metadata (source file, page, chunk index) are saved in a **local ChromaDB** collection (`backend/chroma_db/`).
+5. **Retrieve** — when you ask a question, it's embedded with the `search_query:` prefix and Chroma returns the top-4 most similar chunks.
 6. **Generate** — those 4 chunks are handed to **Groq** (`llama-3.1-8b-instant`), which is instructed to answer *only* from that context and cite `(source, page)` for every claim.
 
-All of this — including live per-document ingestion progress and per-chunk previews — is rendered in the UI as it happens. Ingestion itself is driven from the browser: `POST /api/ingest/start` resets the store and returns the chunk plan, then the frontend loops calling `POST /api/ingest/step` with an advancing offset (each call embeds ~20 chunks) until done. This is a stateless design — no server-side background job — so it works the same whether the backend runs as a long-lived local process or as short-lived Vercel serverless functions.
+All of this — including live per-document ingestion progress and per-chunk previews — is rendered in the UI as it happens. Ingestion itself is driven from the browser: `POST /api/ingest/start` resets the store and returns the chunk plan, then the frontend loops calling `POST /api/ingest/step` with an advancing offset (each call embeds ~20 chunks) until done — so progress is visible without a polled server-side job.
 
 ---
 
@@ -100,11 +100,11 @@ All of this — including live per-document ingestion progress and per-chunk pre
 | Frontend | React 19 + Vite 5 |
 | Backend API | FastAPI (Python) |
 | PDF parsing | [pypdf](https://pypdf.readthedocs.io/) |
-| Embeddings | [Nomic Atlas API](https://atlas.nomic.ai) — `nomic-embed-text-v1.5` |
-| Vector store | [Chroma Cloud](https://www.trychroma.com/cloud) |
+| Embeddings | Local [Ollama](https://ollama.com) — `nomic-embed-text` |
+| Vector store | Local [ChromaDB](https://www.trychroma.com/) (`backend/chroma_db/`) |
 | LLM | [Groq API](https://console.groq.com) — `llama-3.1-8b-instant` |
 
-> This project previously ran fully offline against a local Ollama server and a local ChromaDB folder. That path was replaced with the hosted services above so the same codebase deploys directly to Vercel (see [DEPLOYMENT.md](DEPLOYMENT.md)) — both Nomic Atlas and Chroma Cloud have usable free tiers.
+Everything runs on your machine except answer generation, which calls the hosted Groq API.
 
 ---
 
@@ -112,9 +112,11 @@ All of this — including live per-document ingestion progress and per-chunk pre
 
 - **Python 3.12** with the packages in `backend/requirements.txt`
 - **Node.js 20+** and npm
+- **[Ollama](https://ollama.com)** installed and running locally, with the embedding model pulled:
+  ```bash
+  ollama pull nomic-embed-text
+  ```
 - A **Groq API key** — [console.groq.com](https://console.groq.com)
-- A **Nomic API key** — [atlas.nomic.ai](https://atlas.nomic.ai) (1M free tokens included)
-- A **Chroma Cloud** account and database — [trychroma.com/cloud](https://www.trychroma.com/cloud)
 
 ---
 
@@ -128,24 +130,17 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open `backend/.env` and fill in your keys:
+Open `backend/.env` and fill in your key:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=llama-3.1-8b-instant
 
-NOMIC_API_KEY=your_nomic_api_key_here
-EMBED_MODEL=nomic-embed-text-v1.5
-
-CHROMA_API_KEY=your_chroma_cloud_api_key_here
-CHROMA_TENANT=your_chroma_tenant_id
-CHROMA_DATABASE=your_chroma_database_name
+OLLAMA_BASE_URL=http://localhost:11434
+EMBED_MODEL=nomic-embed-text
 ```
 
-> ⚠️ **Windows note:** `chromadb` depends on a compiled `chroma-hnswlib` extension. If `pip install` pulls a version with no prebuilt wheel for your Python version, pin one explicitly:
-> ```bash
-> pip install chroma-hnswlib==0.7.5
-> ```
+> ⚠️ **Windows note:** older `chromadb` releases depend on a compiled `chroma-hnswlib` extension with no prebuilt Windows wheel. If `pip install` tries to build one from source and fails (needs C++ build tools), leave `chromadb` unpinned in `requirements.txt` so it resolves to a current release — recent versions don't have this dependency.
 
 ### 2. Frontend
 
@@ -159,6 +154,9 @@ npm install
 ## Running it
 
 ```bash
+# 0 — make sure Ollama is running (if not already)
+ollama serve
+
 # 1 — backend API
 cd backend
 python -m uvicorn app.main:app --port 8000
@@ -191,7 +189,7 @@ sequenceDiagram
     Note over UI: Chunks + cited answer render
 ```
 
-Click **Run Ingestion** to process every PDF in `data/data`, then ask a question once at least some documents show `done`. You can start asking questions about already-indexed documents while the rest are still being embedded.
+Click **Run Ingestion** to process every PDF in `backend/data/data`, then ask a question once at least some documents show `done`. You can start asking questions about already-indexed documents while the rest are still being embedded.
 
 ---
 
@@ -203,16 +201,14 @@ Everything is configurable via `backend/.env` (see `backend/.env.example`):
 |---|---|---|
 | `GROQ_API_KEY` | *(required)* | Your Groq API key |
 | `GROQ_MODEL` | `llama-3.1-8b-instant` | Groq model used for answer generation |
-| `NOMIC_API_KEY` | *(required)* | Your Nomic Atlas API key |
-| `EMBED_MODEL` | `nomic-embed-text-v1.5` | Nomic embedding model |
-| `CHROMA_API_KEY` | *(required)* | Your Chroma Cloud API key |
-| `CHROMA_TENANT` | *(required)* | Chroma Cloud tenant ID |
-| `CHROMA_DATABASE` | *(required)* | Chroma Cloud database name |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama server URL |
+| `EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model |
 | `CHUNK_SIZE_WORDS` | `150` | Words per chunk |
 | `CHUNK_OVERLAP_WORDS` | `30` | Word overlap between consecutive chunks |
 | `TOP_K` | `4` | Number of chunks retrieved per query |
 | `INGEST_STEP_BATCH_SIZE` | `20` | Chunks embedded per `/api/ingest/step` call |
 | `DATA_DIR` | `backend/data/data` | Folder scanned for source PDFs |
+| `CHROMA_DIR` | `backend/chroma_db` | Folder where the local Chroma collection is persisted |
 
 `frontend/.env` (see `frontend/.env.example`) has one variable: `VITE_API_BASE_URL`, the backend's URL (defaults to `http://localhost:8000` if unset).
 
@@ -222,18 +218,17 @@ Everything is configurable via `backend/.env` (see `backend/.env.example`):
 
 ```
 RAG_Explorer_E_Commerce/
-├── backend/                    FastAPI app (self-contained — deployable as its own Vercel project)
+├── backend/                    FastAPI app
 │   ├── app/
 │   │   ├── pdf_loader.py       Extracts per-page text from PDFs (pypdf)
 │   │   ├── chunker.py          Splits page text into overlapping word-based chunks
-│   │   ├── embeddings.py       Calls the Nomic Atlas API for embeddings
-│   │   ├── vectorstore.py      Chroma Cloud client wrapper
+│   │   ├── embeddings.py       Calls a local Ollama server for embeddings
+│   │   ├── vectorstore.py      Local ChromaDB (PersistentClient) wrapper
 │   │   ├── ingest_pipeline.py  Stateless chunk-plan + step-based ingestion
 │   │   ├── llm.py              Groq chat completion, grounded in retrieved chunks
 │   │   └── main.py             FastAPI routes
 │   ├── data/data/               Source PDFs to ingest (sample: 10 ShopSphere e-commerce BRDs)
-│   ├── main.py                 Vercel Python entrypoint (re-exports app.main:app)
-│   ├── vercel.json
+│   ├── chroma_db/               Local persisted vector store (gitignored)
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/                   React (Vite) UI
@@ -241,8 +236,7 @@ RAG_Explorer_E_Commerce/
 │       ├── App.jsx             Pipeline state machine (drives the ingest loop)
 │       └── components/         Stepper, ingest panel, query panel, results
 ├── README.md                   This file
-├── Flow_Control.md             Deep-dive: diagrams, API reference, design decisions
-└── DEPLOYMENT.md               Step-by-step Vercel deployment guide
+└── Flow_Control.md             Deep-dive: diagrams, API reference, design decisions
 ```
 
 ---
@@ -259,8 +253,8 @@ RAG_Explorer_E_Commerce/
 
 | Problem | Fix |
 |---|---|
-| `ModuleNotFoundError: hnswlib` or chromadb install fails | `pip install chroma-hnswlib==0.7.5` |
-| `/api/status` or `/api/query` returns `502 Could not connect to Chroma Cloud` | Check `CHROMA_API_KEY` / `CHROMA_TENANT` / `CHROMA_DATABASE` in `backend/.env` and that the database exists in the Chroma Cloud dashboard |
-| Ingestion fails with a Nomic error | Check `NOMIC_API_KEY` in `backend/.env` and remaining token quota |
+| `chromadb` install fails building `hnswlib` (needs C++ build tools) | Remove any `chromadb==` version pin in `requirements.txt` and reinstall — current releases don't depend on compiled `hnswlib` |
+| Ingestion fails with "Could not reach Ollama" | Make sure `ollama serve` is running and `ollama pull nomic-embed-text` has completed |
+| `/api/status` or `/api/query` returns `502 Could not open local Chroma store` | Check that `CHROMA_DIR` (or its default, `backend/chroma_db/`) is writable |
 | Query fails with a Groq error | Check `GROQ_API_KEY` in `backend/.env` and that the account has access to `GROQ_MODEL` |
-| Frontend can't reach the backend | Confirm the backend is running on port 8000; in production, confirm `VITE_API_BASE_URL` was set *before* the frontend was built |
+| Frontend can't reach the backend | Confirm the backend is running on port 8000 (`curl http://localhost:8000/api/health`) |

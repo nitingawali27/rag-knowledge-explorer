@@ -1,6 +1,6 @@
 import chromadb
 
-from .config import CHROMA_API_KEY, CHROMA_DATABASE, CHROMA_TENANT, COLLECTION_NAME
+from .config import CHROMA_DIR, COLLECTION_NAME
 
 _client = None
 
@@ -10,20 +10,12 @@ class VectorStoreError(RuntimeError):
 
 
 def _get_client():
-    # Constructed lazily (not at import time): chromadb.CloudClient() validates
-    # the connection eagerly, so building it at module load would crash the
-    # entire API — including unrelated endpoints like /api/health — on any
-    # Chroma Cloud hiccup or missing credentials.
     global _client
     if _client is None:
         try:
-            _client = chromadb.CloudClient(
-                tenant=CHROMA_TENANT,
-                database=CHROMA_DATABASE,
-                api_key=CHROMA_API_KEY,
-            )
+            _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
         except Exception as exc:  # noqa: BLE001 - surface as a clean, typed error
-            raise VectorStoreError(f"Could not connect to Chroma Cloud: {exc}") from exc
+            raise VectorStoreError(f"Could not open local Chroma store: {exc}") from exc
     return _client
 
 
@@ -35,7 +27,7 @@ def get_collection():
     except VectorStoreError:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise VectorStoreError(f"Chroma Cloud request failed: {exc}") from exc
+        raise VectorStoreError(f"Chroma request failed: {exc}") from exc
 
 
 def reset_collection():
@@ -66,7 +58,7 @@ def add_chunks(chunks, embeddings):
             ],
         )
     except Exception as exc:  # noqa: BLE001
-        raise VectorStoreError(f"Chroma Cloud write failed: {exc}") from exc
+        raise VectorStoreError(f"Chroma write failed: {exc}") from exc
 
 
 def query(embedding, top_k):
@@ -77,7 +69,7 @@ def query(embedding, top_k):
         n_results = min(top_k, collection.count())
         result = collection.query(query_embeddings=[embedding], n_results=n_results)
     except Exception as exc:  # noqa: BLE001
-        raise VectorStoreError(f"Chroma Cloud query failed: {exc}") from exc
+        raise VectorStoreError(f"Chroma query failed: {exc}") from exc
 
     hits = []
     for i in range(len(result["ids"][0])):
@@ -101,5 +93,5 @@ def collection_stats():
             data = collection.get(include=["metadatas"])
             sources = {m["source"] for m in data["metadatas"]}
     except Exception as exc:  # noqa: BLE001
-        raise VectorStoreError(f"Chroma Cloud request failed: {exc}") from exc
+        raise VectorStoreError(f"Chroma request failed: {exc}") from exc
     return {"chunk_count": count, "document_count": len(sources), "sources": sorted(sources)}

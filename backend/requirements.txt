@@ -1,7 +1,6 @@
 fastapi
 uvicorn[standard]
 chromadb
-nomic
 groq
 pypdf
 requests
