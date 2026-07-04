@@ -1,0 +1,22 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, Roboto, sans-serif;
+  color: #1a1a1a;
+  background: #f5f7fb;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+code {
+  font-family: ui-monospace, Consolas, monospace;
+  background: #eef2fa;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #0b3d91;
+}

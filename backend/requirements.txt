@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+chromadb
+groq
+pypdf
+requests
+python-dotenv
+pydantic
