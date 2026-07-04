@@ -68,7 +68,7 @@ export default function IngestPanel({ progress, onIngest, disabled }) {
           {progress.embedding_dimension > 0 && (
             <p className="muted">
               Embedding dimension: <strong>{progress.embedding_dimension}</strong>{" "}
-              (nomic-embed-text)
+              (nomic-embed-text-v1.5)
             </p>
           )}
 

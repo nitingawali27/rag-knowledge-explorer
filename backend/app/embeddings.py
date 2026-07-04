@@ -1,41 +1,39 @@
-from concurrent.futures import ThreadPoolExecutor
+import nomic
+from nomic import embed
 
-import requests
+from .config import EMBED_MODEL, NOMIC_API_KEY
 
-from .config import EMBED_MODEL, OLLAMA_BASE_URL
-
-DOCUMENT_PREFIX = "search_document: "
-QUERY_PREFIX = "search_query: "
-MAX_WORKERS = 4
+_logged_in = False
 
 
 class EmbeddingError(RuntimeError):
     pass
 
 
-def _embed_one(text: str) -> list[float]:
+def _ensure_login():
+    global _logged_in
+    if _logged_in:
+        return
+    if not NOMIC_API_KEY:
+        raise EmbeddingError("NOMIC_API_KEY is not set.")
+    nomic.login(NOMIC_API_KEY)
+    _logged_in = True
+
+
+def _embed(texts: list[str], task_type: str) -> list[list[float]]:
+    if not texts:
+        return []
+    _ensure_login()
     try:
-        resp = requests.post(
-            f"{OLLAMA_BASE_URL}/api/embed",
-            json={"model": EMBED_MODEL, "input": [text]},
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.json()["embeddings"][0]
-    except requests.RequestException as exc:
-        raise EmbeddingError(
-            f"Could not reach Ollama at {OLLAMA_BASE_URL}. Is `ollama serve` running "
-            f"and has `{EMBED_MODEL}` been pulled (`ollama pull {EMBED_MODEL}`)? {exc}"
-        ) from exc
+        output = embed.text(texts=texts, model=EMBED_MODEL, task_type=task_type)
+    except Exception as exc:  # noqa: BLE001 - surface any Nomic API failure clearly
+        raise EmbeddingError(f"Nomic embedding request failed: {exc}") from exc
+    return output["embeddings"]
 
 
 def embed_documents(texts: list[str]) -> list[list[float]]:
-    if not texts:
-        return []
-    prefixed = [DOCUMENT_PREFIX + t for t in texts]
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        return list(pool.map(_embed_one, prefixed))
+    return _embed(texts, task_type="search_document")
 
 
 def embed_query(text: str) -> list[float]:
-    return _embed_one(QUERY_PREFIX + text)
+    return _embed([text], task_type="search_query")[0]

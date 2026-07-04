@@ -1,10 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import PipelineStepper from "./components/PipelineStepper";
 import IngestPanel from "./components/IngestPanel";
 import QueryPanel from "./components/QueryPanel";
 import ResultsPanel from "./components/ResultsPanel";
-import { askQuestion, getIngestProgress, getStatus, startIngest } from "./api";
+import { askQuestion, getStatus, ingestStep, startIngest } from "./api";
+
+const STEP_BATCH_SIZE = 20;
+
+function withDocumentStatuses(documents, chunksEmbedded) {
+  let cumulative = 0;
+  let currentDocument = null;
+  const documentsWithStatus = documents.map((d) => {
+    const start = cumulative;
+    cumulative += d.chunks;
+    let status = "pending";
+    if (chunksEmbedded >= cumulative) status = "done";
+    else if (chunksEmbedded >= start) status = "embedding";
+    if (status === "embedding") currentDocument = d.filename;
+    return { ...d, status };
+  });
+  return { documentsWithStatus, currentDocument };
+}
 
 function App() {
   const [status, setStatus] = useState(null);
@@ -12,49 +29,61 @@ function App() {
   const [result, setResult] = useState(null);
   const [asking, setAsking] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
-  const pollRef = useRef(null);
 
   useEffect(() => {
     getStatus().then(setStatus).catch(() => {});
-    getIngestProgress()
-      .then((p) => {
-        if (p.status === "running") {
-          setProgress(p);
-          pollProgress();
-        } else if (p.status === "done") {
-          setProgress(p);
-        }
-      })
-      .catch(() => {});
   }, []);
 
-  const pollProgress = () => {
-    if (pollRef.current) return;
-    pollRef.current = setInterval(async () => {
-      try {
-        const p = await getIngestProgress();
-        setProgress(p);
-        if (p.status !== "running") {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-          const s = await getStatus();
-          setStatus(s);
-        }
-      } catch {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    }, 1000);
-  };
-
+  // Ingestion is driven entirely from the browser: each call to /api/ingest/step
+  // is an independent, stateless serverless invocation, so the client owns the
+  // progress loop instead of polling a server-side background job.
   const handleIngest = async () => {
     setErrorMsg(null);
     setResult(null);
+
     try {
-      await startIngest();
-      pollProgress();
+      const { documents, total_chunks } = await startIngest();
+      const { documentsWithStatus, currentDocument } = withDocumentStatuses(documents, 0);
+      setProgress({
+        status: "running",
+        documents: documentsWithStatus,
+        total_chunks,
+        chunks_embedded: 0,
+        current_document: currentDocument,
+        sample_chunks: [],
+        embedding_dimension: 0,
+      });
+
+      let offset = 0;
+      while (offset < total_chunks) {
+        const step = await ingestStep(offset, STEP_BATCH_SIZE);
+        offset = step.next_offset;
+
+        setProgress((prev) => {
+          const { documentsWithStatus: docs, currentDocument: current } =
+            withDocumentStatuses(documents, offset);
+          return {
+            ...prev,
+            documents: docs,
+            chunks_embedded: offset,
+            current_document: current,
+            embedding_dimension: step.embedding_dimension || prev.embedding_dimension,
+            sample_chunks:
+              prev.sample_chunks.length < 6
+                ? [...prev.sample_chunks, ...step.sample_chunks].slice(0, 6)
+                : prev.sample_chunks,
+          };
+        });
+
+        if (step.done) break;
+      }
+
+      setProgress((prev) => ({ ...prev, status: "done", current_document: null }));
+      const s = await getStatus();
+      setStatus(s);
     } catch (e) {
       setErrorMsg(e.message);
+      setProgress((prev) => (prev ? { ...prev, status: "error", error: e.message } : prev));
     }
   };
 
